@@ -210,7 +210,7 @@ class BaseTrainer:
         for epoch in range(start_epoch, self.num_epoch):
         
             epoch_str = f"Epoch[{epoch+1}/{self.num_epoch}]\n\ttrain: "
-            loss = self.train_epoch(epoch, train_corr=train_corr)
+            loss = self.train_epoch(epoch)
             assert not math.isnan(loss['Loss']), f"Nan-loss at epoch: {epoch}"
         
             # write loss to tensorboard

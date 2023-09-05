@@ -40,7 +40,6 @@ def load_data(data_config: dict, traj_config: dict, test_only=False):
     # Min agents with greater than or equal to
     min_agents, sk = traj_config.min_agents, traj_config.skip
     out_name = f"{name}_{loader_type}_hl-{hl}_fl-{fl}_hs-{hs}_fs-{fs}_sk-{sk}_ag-{min_agents}.npy"
-    
     if loader_type == 'fpv':
         out_name = fpv_dataset_name(data_config, traj_config, out_name)
     elif loader_type == 'bev':

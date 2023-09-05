@@ -663,8 +663,8 @@ def fpv_seq_collate(data):
     return tuple([obs_seq, obs_resnet, obs_seq_start_end, pred_seq, pred_seq_start_end])
 
 def fpv_dataset_name(data_config, traj_config, out_name):
-    if 'balance' in data_config and data_config['balance']['enabled']:
-        out_name = out_name.replace('.npy', f'_bal.npy')
+    # if 'balance' in data_config and data_config['balance']['enabled']:
+    #     out_name = out_name.replace('.npy', f'_bal.npy')
     if 'min_detection_len' in data_config:
         out_name = out_name.replace('.npy', f'_mdl-{data_config.min_detection_len}.npy')
     if data_config.load_images:

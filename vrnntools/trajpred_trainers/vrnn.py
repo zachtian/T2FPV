@@ -71,7 +71,7 @@ class VRNNTrainer(BaseTrainer):
                 fut_abs[..., :2], fut_abs[..., 2], fut_abs[..., 3:5], fut_abs[..., 5]
             hist_len = hist_abs.shape[0]
             fut_abs, fut_yaw, fut_abs_img, fut_valid = gt_abs[hist_len:], gt_yaw[hist_len:], gt_abs_img[hist_len:], gt_valid[hist_len:]
-
+            #import pdb; pdb.set_trace()
             assert (hist_seq_start_end == fut_seq_start_end).all(), 'In training, alignment required'
             # Only fully observed gt_abs stuff...
             if self.interp_valid_only:
