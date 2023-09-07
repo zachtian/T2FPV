@@ -24,8 +24,28 @@ import torch.utils.data
 from helpers import *
 
 def get_model(fold):
-    save_path = f'out/saved/NAOMI_{fold}_001/model/policy_step1_state_dict_best_pretrain_entire.pth'
-    model = torch.load(save_path)
+    params = {
+        'task' : 'eth',
+        'batch' : 128,
+        'y_dim' : 2,
+        'rnn_dim' : 64,
+        'dec1_dim' : 64,
+        'dec2_dim' : 64,
+        'dec4_dim' : 64,
+        'dec8_dim' : 64,
+        'dec16_dim' : 64,
+        'n_layers' : 2,
+        'discrim_rnn_dim' : 64,
+        'discrim_num_layers' : 2,
+        'cuda' : True,
+        'highest' : 1,
+    }
+
+    save_path = f'out/saved/NAOMI_{fold}_001/model/policy_step1_state_dict_best_pretrain.pth'
+    model = NAOMI(params)
+    state_dict = torch.load(save_path)
+    model.load_state_dict(state_dict)
+    model = model.cuda()
     return model, save_path
 
 if __name__ == '__main__':
@@ -40,7 +60,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', '--trial', type=int, default=42)
     parser.add_argument('--model', type=str, default='NAOMI', help='NAOMI, SingleRes')
-    parser.add_argument('--task', type=str, default='billiard', help='basketball, billiard, eth')
+    parser.add_argument('--task', type=str, default='eth', help='basketball, billiard, eth')
     parser.add_argument('--y_dim', type=int, default=2)
     parser.add_argument('--rnn_dim', type=int, default=64)
     parser.add_argument('--dec1_dim', type=int, default=64)
@@ -52,9 +72,9 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, required=False, default=123)
     parser.add_argument('--clip', type=int, default=10, help='gradient clipping')
     parser.add_argument('--pre_start_lr', type=float, default=1e-3, help='pretrain starting learning rate')
-    parser.add_argument('--batch_size', type=int, required=False, default=64)
+    parser.add_argument('--batch_size', type=int, required=False, default=128)
     parser.add_argument('--save_every', type=int, required=False, default=50, help='periodically save model')
-    parser.add_argument('--pretrain', type=int, required=False, default=50, help='num epochs to use supervised learning to pretrain')
+    parser.add_argument('--pretrain', type=int, required=False, default=100, help='num epochs to use supervised learning to pretrain')
     parser.add_argument('--highest', type=int, required=False, default=1, help='highest resolution in terms of step size in NAOMI')
     parser.add_argument('--cuda', action='store_true', default=True, help='use GPU')
 
@@ -127,41 +147,31 @@ if __name__ == '__main__':
         torch.save(policy_net, out_name)
         exit()
 
-    # Data
-    if args.task == 'basketball':
-        assert False, 'Not supported rn'
-        test_data = torch.Tensor(pickle.load(open('data/basketball_eval.p', 'rb'))).transpose(0, 1)[:, :-1, :]
-        train_data = torch.Tensor(pickle.load(open('data/basketball_train.p', 'rb'))).transpose(0, 1)[:, :-1, :]
-    elif args.task == 'billiard':
-        assert False, 'Not supported rn'
-        test_data = torch.Tensor(pickle.load(open('data/billiard_eval.p', 'rb'), encoding='latin1'))[:, :, :]
-        train_data = torch.Tensor(pickle.load(open('data/billiard_train.p', 'rb'), encoding='latin1'))[:, :, :]
-    else:
-        pretrained_path = "./config/fpv_det_train/sgnet_cvae.json"
-        from run import get_exp_config
-        fold = args.task
-        assert fold in ['eth', 'hotel', 'univ', 'zara1', 'zara2'], 'Incorrect fold'
-        pre_config = get_exp_config(pretrained_path, run_type='test', ckpt=None, fold=fold, gpu_id=0, use_cpu=False,
-                                    max_test_epoch=10000, corr=False, epochs=100, no_tqdm=False)
-        pre_config['load_ckpt'] = True
-        pre_config['ckpt_name'] = False
-        from vrnntools.trajpred_trainers.module import ModuleTrainer
-        from vrnntools.trajpred_trainers.sgnet_cvae import SGNetCVAETrainer
-        from vrnntools.trajpred_trainers.ego_avrnn import EgoAVRNNTrainer
-        from vrnntools.trajpred_trainers.ego_vrnn import EgoVRNNTrainer
-        #assert pre_config['trainer'] == 'module', 'Pretrained type must be module trainer'
-        if pre_config['trainer'] == 'module':
-            trainer = ModuleTrainer(config=pre_config)
-        elif pre_config['trainer'] == 'ego_vrnn':
-            trainer = EgoVRNNTrainer(config=pre_config)
-        elif pre_config['trainer'] == 'ego_avrnn':
-            trainer = EgoAVRNNTrainer(config=pre_config)
-        elif pre_config['trainer'] == 'sgnet':
-            trainer = SGNetCVAETrainer(config=pre_config)
-        _ = trainer.eval(do_eval=False, load_only=True)
-        test_data = trainer.test_data
-        val_data = trainer.val_data
-        train_data = trainer.train_data
+    pretrained_path = "./config/fpv_det_train/sgnet_cvae.json"
+    from run import get_exp_config
+    fold = args.task
+    assert fold in ['eth', 'hotel', 'univ', 'zara1', 'zara2'], 'Incorrect fold'
+    pre_config = get_exp_config(pretrained_path, run_type='test', ckpt=None, fold=fold, gpu_id=0, use_cpu=False,
+                                max_test_epoch=10000, corr=False, epochs=100, no_tqdm=False)
+    pre_config['load_ckpt'] = True
+    pre_config['ckpt_name'] = False
+    from vrnntools.trajpred_trainers.module import ModuleTrainer
+    from vrnntools.trajpred_trainers.sgnet_cvae import SGNetCVAETrainer
+    from vrnntools.trajpred_trainers.ego_avrnn import EgoAVRNNTrainer
+    from vrnntools.trajpred_trainers.ego_vrnn import EgoVRNNTrainer
+    #assert pre_config['trainer'] == 'module', 'Pretrained type must be module trainer'
+    if pre_config['trainer'] == 'module':
+        trainer = ModuleTrainer(config=pre_config)
+    elif pre_config['trainer'] == 'ego_vrnn':
+        trainer = EgoVRNNTrainer(config=pre_config)
+    elif pre_config['trainer'] == 'ego_avrnn':
+        trainer = EgoAVRNNTrainer(config=pre_config)
+    elif pre_config['trainer'] == 'sgnet':
+        trainer = SGNetCVAETrainer(config=pre_config)
+    _ = trainer.eval(do_eval=False, load_only=True)
+    test_data = trainer.test_data
+    val_data = trainer.val_data
+    train_data = trainer.train_data
     #print(test_data.shape, train_data.shape)
 
     # figures and statistics
@@ -169,15 +179,6 @@ if __name__ == '__main__':
         shutil.rmtree('imgs')
     if not os.path.exists('imgs'):
         os.makedirs('imgs')
-    # vis = visdom.Visdom(env = args.model + args.task + str(args.trial))
-    # win_pre_policy = None
-    # win_pre_path_length = None
-    # win_pre_out_of_bound = None
-    # win_pre_step_change = None
-
-    ############################################################################
-    ##################       START SUPERVISED PRETRAIN        ##################
-    ############################################################################
 
     # pretrain
     best_test_loss = 0
@@ -187,32 +188,19 @@ if __name__ == '__main__':
     for e in range(pretrain_epochs):
         epoch = e+1
         print("Epoch: {}".format(epoch))
-
-        # draw and stats 
-        # _, _, _, _, _, _, mod_stats, exp_stats = \
-        #         collect_samples_interpolate(policy_net, test_data, use_gpu, e, args.task, name='pretrain_inter', draw=True, stats=True)
-                
+  
         update = 'append' if epoch > 1 else None
-        # win_pre_path_length = vis.line(X = np.array([epoch]), \
-        #     Y = np.column_stack((np.array([exp_stats['ave_length']]), np.array([mod_stats['ave_length']]))), \
-        #     win = win_pre_path_length, update = update, opts=dict(legend=['expert', 'model'], title="average path length"))
-        # win_pre_out_of_bound = vis.line(X = np.array([epoch]), \
-        #     Y = np.column_stack((np.array([exp_stats['ave_out_of_bound']]), np.array([mod_stats['ave_out_of_bound']]))), \
-        #     win = win_pre_out_of_bound, update = update, opts=dict(legend=['expert', 'model'], title="average out of bound rate"))
-        # win_pre_step_change = vis.line(X = np.array([epoch]), \
-        #     Y = np.column_stack((np.array([exp_stats['ave_change_step_size']]), np.array([mod_stats['ave_change_step_size']]))), \
-        #     win = win_pre_step_change, update = update, opts=dict(legend=['expert', 'model'], title="average step size change"))
 
         # control learning rate
         if epoch == pretrain_epochs // 2:
             lr = lr / 10
             print(lr)
             
-        if args.task != 'basketball' and epoch == pretrain_epochs * 2 // 3:
+        if epoch == pretrain_epochs * 2 // 3:
             teacher_forcing = False
 
         # train
-        optimizer = torch.optim.Adam(
+        optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, policy_net.parameters()),
             lr=lr)
 
@@ -221,15 +209,8 @@ if __name__ == '__main__':
         train_loss = run_epoch(True, policy_net, train_data, clip, optimizer, teacher_forcing=teacher_forcing)
         printlog('Train:\t' + str(train_loss))
 
-        #val_loss = run_epoch(False, policy_net, val_data, clip, optimizer, teacher_forcing=teacher_forcing)
         val_loss = run_epoch(False, policy_net, val_data, clip, optimizer, teacher_forcing=teacher_forcing)
         printlog('Val:\t' + str(val_loss))
-
-        # test_loss = run_epoch(False, policy_net, test_data, clip, optimizer, teacher_forcing=teacher_forcing)
-        # printlog(f'Test:\t' + str(test_loss))
-
-        # test_loss = run_epoch(False, None, test_data, clip, optimizer, teacher_forcing=teacher_forcing)
-        # printlog(f'Base test:\t' + str(test_loss))
 
 
         epoch_time = time.time() - start_time
@@ -238,9 +219,6 @@ if __name__ == '__main__':
         total_test_loss = val_loss
         
         update = 'append' if epoch > 1 else None
-        # win_pre_policy = vis.line(X = np.array([epoch]), Y = np.column_stack((np.array([test_loss]), np.array([train_loss]))), \
-        #     win = win_pre_policy, update = update, opts=dict(legend=['out-of-sample loss', 'in-sample loss'], \
-        #                                                      title="pretrain policy training curve"))
 
         # best model on test set
         if (best_test_loss == 0 or total_test_loss < best_test_loss) and not teacher_forcing:    
@@ -266,6 +244,4 @@ if __name__ == '__main__':
     test_loss = run_epoch(False, None, test_data, clip, optimizer, teacher_forcing=teacher_forcing)
     printlog(f'Base Test at epoch {best_epoch}:\t' + str(test_loss))
 
-    # billiard does not need adversarial training
-    if args.task != 'basketball':
-        exit()
+    exit()

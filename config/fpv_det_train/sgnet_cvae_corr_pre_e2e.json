@@ -8,5 +8,5 @@
         "pretrained_pred": false
     },
 
-    "model_design": "./config/models/sgnet_cvae.json"
+    "model_design": "./config/models/sgnet_cvae_corr.json"
 }
