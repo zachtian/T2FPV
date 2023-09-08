@@ -9,7 +9,7 @@ from torch.autograd import Variable
 from vrnntools.trajpred_models.modeling.mlp import MLP
 from vrnntools.utils.common import dotdict
 from vrnntools.utils.adj_matrix import simple_distsim_adjs
-from vrnntools.trajpred_models.modeling.gat import GAT, SpGAT
+from vrnntools.trajpred_models.modeling.gat import GAT
 from vrnntools.utils.adj_matrix import ego_dists, simple_adjs, simple_distsim_adjs
 
 class SGNet_CVAE(nn.Module):
@@ -78,12 +78,9 @@ class SGNet_CVAE(nn.Module):
                 self.graph = avg_pool
             else:
                 assert False, 'Invalid graph type provided'
-            # if self.layer_norm:
-            #     self.lg = nn.Sequential(nn.Linear(self.hidden_size + self.hidden_size, self.hidden_size),
-            #                             nn.LayerNorm(self.hidden_size))
-            # else:
-            #     self.lg = nn.Linear(self.hidden_size + self.hidden_size, self.hidden_size)
-            self.lg = nn.Linear(self.hidden_size + self.hidden_size, self.hidden_size)
+            self.lg = nn.Sequential(nn.Linear(self.hidden_size + self.hidden_size, self.hidden_size),
+                                    nn.LayerNorm(self.hidden_size))
+
         else:
             self.sigma = None
             self.graph = None
@@ -119,82 +116,48 @@ class SGNet_CVAE(nn.Module):
         # the predict shift is in meter
         self.regressor = nn.Sequential(nn.Linear(self.hidden_size, 
                                                     self.pred_dim))   
-        if self.layer_norm:
-            self.enc_goal_attn = nn.Sequential(nn.Linear(self.hidden_size//4,
-                                                    1),
-                                                    nn.LayerNorm(1),
-                                                    nn.ReLU(inplace=True))
-            self.dec_goal_attn = nn.Sequential(nn.Linear(self.hidden_size//4,
-                                                    1),
-                                                    nn.LayerNorm(1),
-                                                    nn.ReLU(inplace=True))
+        self.enc_goal_attn = nn.Sequential(nn.Linear(self.hidden_size//4,
+                                                1),
+                                                nn.LayerNorm(1),
+                                                nn.ReLU(inplace=True))
+        self.dec_goal_attn = nn.Sequential(nn.Linear(self.hidden_size//4,
+                                                1),
+                                                nn.LayerNorm(1),
+                                                nn.ReLU(inplace=True))
 
-            self.enc_to_goal_hidden = nn.Sequential(nn.Linear(self.hidden_size,
+        self.enc_to_goal_hidden = nn.Sequential(nn.Linear(self.hidden_size,
+                                                self.hidden_size//4),
+                                                nn.LayerNorm(self.hidden_size//4),
+                                                nn.ReLU(inplace=True))
+        self.goal_hidden_to_traj = nn.Sequential(nn.Linear(self.hidden_size//4,
+                                                    self.hidden_size),
+                                                nn.LayerNorm(self.hidden_size),
+                                                nn.ReLU(inplace=True))
+        self.cvae_to_dec_hidden = nn.Sequential(nn.Linear(self.hidden_size + args.LATENT_DIM,
+                                                self.hidden_size),
+                                                nn.LayerNorm(self.hidden_size),
+                                                nn.ReLU(inplace=True))
+        self.enc_to_dec_hidden = nn.Sequential(nn.Linear(self.hidden_size,
+                                                self.hidden_size),
+                                                nn.LayerNorm(self.hidden_size),
+                                                nn.ReLU(inplace=True))
+
+        self.goal_hidden_to_input = nn.Sequential(nn.Linear(self.hidden_size//4,
                                                     self.hidden_size//4),
-                                                    nn.LayerNorm(self.hidden_size//4),
-                                                    nn.ReLU(inplace=True))
-            self.goal_hidden_to_traj = nn.Sequential(nn.Linear(self.hidden_size//4,
-                                                        self.hidden_size),
-                                                    nn.LayerNorm(self.hidden_size),
-                                                    nn.ReLU(inplace=True))
-            self.cvae_to_dec_hidden = nn.Sequential(nn.Linear(self.hidden_size + args.LATENT_DIM,
+                                                nn.LayerNorm(self.hidden_size//4),
+                                                nn.ReLU(inplace=True))
+        self.dec_hidden_to_input = nn.Sequential(nn.Linear(self.hidden_size,
                                                     self.hidden_size),
-                                                    nn.LayerNorm(self.hidden_size),
-                                                    nn.ReLU(inplace=True))
-            self.enc_to_dec_hidden = nn.Sequential(nn.Linear(self.hidden_size,
-                                                    self.hidden_size),
-                                                    nn.LayerNorm(self.hidden_size),
-                                                    nn.ReLU(inplace=True))
-
-            self.goal_hidden_to_input = nn.Sequential(nn.Linear(self.hidden_size//4,
-                                                        self.hidden_size//4),
-                                                    nn.LayerNorm(self.hidden_size//4),
-                                                    nn.ReLU(inplace=True))
-            self.dec_hidden_to_input = nn.Sequential(nn.Linear(self.hidden_size,
-                                                        self.hidden_size),
-                                                    nn.LayerNorm(self.hidden_size),
-                                                    nn.ReLU(inplace=True))
-            self.goal_to_enc = nn.Sequential(nn.Linear(self.hidden_size//4,
-                                                        self.hidden_size//4),
-                                                    nn.LayerNorm(self.hidden_size//4),
-                                                    nn.ReLU(inplace=True))
-            self.goal_to_dec = nn.Sequential(nn.Linear(self.hidden_size//4,
-                                                        self.hidden_size//4),
-                                                    nn.LayerNorm(self.hidden_size//4),
-                                                    nn.ReLU(inplace=True))
-        else:
-            self.enc_goal_attn = nn.Sequential(nn.Linear(self.hidden_size//4,
-                                                    1),
-                                                    nn.ReLU(inplace=True))
-            self.dec_goal_attn = nn.Sequential(nn.Linear(self.hidden_size//4,
-                                                    1),
-                                                    nn.ReLU(inplace=True))
-
-            self.enc_to_goal_hidden = nn.Sequential(nn.Linear(self.hidden_size,
+                                                nn.LayerNorm(self.hidden_size),
+                                                nn.ReLU(inplace=True))
+        self.goal_to_enc = nn.Sequential(nn.Linear(self.hidden_size//4,
                                                     self.hidden_size//4),
-                                                    nn.ReLU(inplace=True))
-            self.goal_hidden_to_traj = nn.Sequential(nn.Linear(self.hidden_size//4,
-                                                        self.hidden_size),
-                                                        nn.ReLU(inplace=True))
-            self.cvae_to_dec_hidden = nn.Sequential(nn.Linear(self.hidden_size + args.LATENT_DIM,
-                                                    self.hidden_size),
-                                                    nn.ReLU(inplace=True))
-            self.enc_to_dec_hidden = nn.Sequential(nn.Linear(self.hidden_size,
-                                                    self.hidden_size),
-                                                    nn.ReLU(inplace=True))
-
-            self.goal_hidden_to_input = nn.Sequential(nn.Linear(self.hidden_size//4,
-                                                        self.hidden_size//4),
-                                                        nn.ReLU(inplace=True))
-            self.dec_hidden_to_input = nn.Sequential(nn.Linear(self.hidden_size,
-                                                        self.hidden_size),
-                                                        nn.ReLU(inplace=True))
-            self.goal_to_enc = nn.Sequential(nn.Linear(self.hidden_size//4,
-                                                        self.hidden_size//4),
-                                                        nn.ReLU(inplace=True))
-            self.goal_to_dec = nn.Sequential(nn.Linear(self.hidden_size//4,
-                                                        self.hidden_size//4),
-                                                        nn.ReLU(inplace=True))
+                                                nn.LayerNorm(self.hidden_size//4),
+                                                nn.ReLU(inplace=True))
+        self.goal_to_dec = nn.Sequential(nn.Linear(self.hidden_size//4,
+                                                    self.hidden_size//4),
+                                                nn.LayerNorm(self.hidden_size//4),
+                                                nn.ReLU(inplace=True))
 
         self.enc_drop = nn.Dropout(self.dropout)
         self.goal_drop = nn.Dropout(self.dropout)
@@ -322,8 +285,6 @@ class SGNet_CVAE(nn.Module):
         rel_pred = torch.zeros(hist_abs_pred.shape).to(hist_abs_pred.device)
         rel_pred[1:] = hist_abs_pred[1:] - hist_abs_pred[:-1]
 
-        # https://stackoverflow.com/a/7869457
-        # TODO: diff from beginning only?
         xy_gt = hist_abs_gt
         offset_xy_gt = ego_dists(hist_abs_gt, hist_seq_start_end)
         offset_yaw_gt = torch.deg2rad((180 + ego_dists(hist_yaw_gt, hist_seq_start_end)) % 360 - 180)
@@ -453,15 +414,4 @@ class SGNet_CVAE(nn.Module):
         return samples
 
     def _mse(self, pred_x, gt_x) -> torch.tensor:
-        """ Mean Squared Error between ground truth tensor (gt_x) and predicted
-        tensor (pred_x). 
-        Inputs:
-        -------
-        pred_x[torch.tensor]: predicted patterns
-        gt_x[torch.tensor]: Ground truth patterns
-        
-        Outpus:
-        --------
-        mse[torch.Float]: mean squared error value
-        """
         return torch.sqrt(self.criterion(pred_x, gt_x))

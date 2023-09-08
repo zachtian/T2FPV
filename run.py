@@ -9,6 +9,7 @@ from vrnntools.trajpred_trainers.module import ModuleTrainer
 from vrnntools.trajpred_trainers.ego_vrnn import EgoVRNNTrainer
 from vrnntools.trajpred_trainers.ego_avrnn import EgoAVRNNTrainer
 from vrnntools.trajpred_trainers.sgnet_cvae import SGNetCVAETrainer
+from vrnntools.trajpred_trainers.transformer import TransformerTrainer
 
 def get_exp_config(exp_config: str, run_type: str, ckpt: int, fold, gpu_id, use_cpu, max_test_epoch, corr, epochs, no_tqdm):
     # load the configuration files
@@ -77,6 +78,8 @@ def run_task(params) -> None:
         trainer = ModuleTrainer(config=config)
     elif trainer_type == "sgnet":
         trainer = SGNetCVAETrainer(config=config)
+    elif trainer_type == "transformer":
+        trainer = TransformerTrainer(config=config)
     else:
         raise NotImplementedError(f"Trainer {trainer_type} not supported!")
 

@@ -25,7 +25,7 @@ from helpers import *
 
 def get_model(fold):
     params = {
-        'task' : 'eth',
+        'task' : fold,
         'batch' : 128,
         'y_dim' : 2,
         'rnn_dim' : 64,
@@ -58,9 +58,9 @@ if __name__ == '__main__':
             file.write(line+'\n')
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--trial', type=int, default=42)
+    parser.add_argument('-t', '--trial', type=int, default=1)
     parser.add_argument('--model', type=str, default='NAOMI', help='NAOMI, SingleRes')
-    parser.add_argument('--task', type=str, default='eth', help='basketball, billiard, eth')
+    parser.add_argument('--task', type=str, default='hotel', help='basketball, billiard, eth')
     parser.add_argument('--y_dim', type=int, default=2)
     parser.add_argument('--rnn_dim', type=int, default=64)
     parser.add_argument('--dec1_dim', type=int, default=64)
@@ -150,7 +150,6 @@ if __name__ == '__main__':
     pretrained_path = "./config/fpv_det_train/sgnet_cvae.json"
     from run import get_exp_config
     fold = args.task
-    assert fold in ['eth', 'hotel', 'univ', 'zara1', 'zara2'], 'Incorrect fold'
     pre_config = get_exp_config(pretrained_path, run_type='test', ckpt=None, fold=fold, gpu_id=0, use_cpu=False,
                                 max_test_epoch=10000, corr=False, epochs=100, no_tqdm=False)
     pre_config['load_ckpt'] = True
@@ -159,7 +158,6 @@ if __name__ == '__main__':
     from vrnntools.trajpred_trainers.sgnet_cvae import SGNetCVAETrainer
     from vrnntools.trajpred_trainers.ego_avrnn import EgoAVRNNTrainer
     from vrnntools.trajpred_trainers.ego_vrnn import EgoVRNNTrainer
-    #assert pre_config['trainer'] == 'module', 'Pretrained type must be module trainer'
     if pre_config['trainer'] == 'module':
         trainer = ModuleTrainer(config=pre_config)
     elif pre_config['trainer'] == 'ego_vrnn':
@@ -172,8 +170,6 @@ if __name__ == '__main__':
     test_data = trainer.test_data
     val_data = trainer.val_data
     train_data = trainer.train_data
-    #print(test_data.shape, train_data.shape)
-
     # figures and statistics
     if os.path.exists('imgs'):
         shutil.rmtree('imgs')
