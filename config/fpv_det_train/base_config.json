@@ -1,41 +1,41 @@
 {
 	"out_dir": "out",
-	"sub_dirs": ["ckpts", "videos", "plots", "trajs"],
-
+	"sub_dirs": [
+		"ckpts",
+		"videos",
+		"plots",
+		"trajs"
+	],
 	"log_mode": "info",
 	"log_file": "experiment.log",
-
 	"gpu_id": 0,
 	"use_cpu": false,
-
-    "multi_test": true,
-    "test_info": [
-        {
-            "path": "./config/fpv_det_train/base_config.json",
-            "name": "FPV-DetTrain"
-        }
-    ],
-
+	"multi_test": true,
+	"test_info": [
+		{
+			"path": "./config/fpv_det_train/base_config.json",
+			"name": "FPV-DetTrain"
+		}
+	],
 	"trajectory": {
 		"hist_len": 8,
 		"hist_step": 10,
 		"fut_len": 12,
 		"fut_step": 10,
 		"skip": 1,
-        "min_agents": 2,
-        "frame_skip": 10,
+		"min_agents": 2,
+		"frame_skip": 10,
 		"smoothing": false
 	},
-
 	"dataset": {
 		"loader_type": "fpv",
 		"name": "eth",
 		"pred_dets": true,
-        "load_images": true,
-        "load_detections": true,
+		"load_images": true,
+		"load_detections": true,
 		"alignment": true,
 		"hungarian_match": true,
-        "min_detection_len": 3,
+		"min_detection_len": 3,
 		"balance": {
 			"enabled": true,
 			"seed": 1,
@@ -46,25 +46,24 @@
 			},
 			"max_scene": 1000000
 		},
-        "load_resnet": true,
+		"load_resnet": true,
 		"load_npy": true,
-        "img_width": 640,
-        "img_height": 480,
-        "vis_ratio": 100,
+		"img_width": 640,
+		"img_height": 480,
+		"vis_ratio": 100,
 		"no_trainval": false,
 		"npy_path": "./data/processed/",
-        "dets_path": "./data/FPVDataset/pred_dets",
-        "imgs_path": "./data/FPVDataset/imgs",
-        "splits_path": "./data/FPVDataset/sgan_splits",
-        "use_input_cache": true,
-        "input_cache_path": "./data/input_data.pkl",
+		"dets_path": "./data/FPVDataset/pred_dets",
+		"imgs_path": "./data/FPVDataset/imgs",
+		"splits_path": "./data/FPVDataset/sgan_splits",
+		"use_input_cache": true,
+		"input_cache_path": "./data/input_data.pkl",
 		"normalize": false,
-		"train_batch_size": 64,
-		"val_batch_size": 64,
-		"test_batch_size": 64,
+		"train_batch_size": 256,
+		"val_batch_size": 256,
+		"test_batch_size": 256,
 		"loader_num_workers": 0
 	},
-
 	"training_details": {
 		"num_samples": 20,
 		"max_agents": 1000,
@@ -87,7 +86,6 @@
 		"gradient_clip": 10,
 		"seed": 1
 	},
-
 	"visualization": {
 		"enabled": false,
 		"plot_freq": 10000

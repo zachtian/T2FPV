@@ -11,7 +11,7 @@ from vrnntools.utils.common import dotdict
 from vrnntools.utils.adj_matrix import simple_distsim_adjs
 from vrnntools.trajpred_models.modeling.gat import GAT
 from vrnntools.utils.adj_matrix import ego_dists, simple_adjs, simple_distsim_adjs
-
+import pdb
 class SGNet_CVAE(nn.Module):
     def __init__(self, args, device):
         super(SGNet_CVAE, self).__init__()
@@ -239,6 +239,7 @@ class SGNet_CVAE(nn.Module):
             all_goal_traj[:,enc_step,:,:] = goal_traj
             dec_hidden = self.enc_to_dec_hidden(enc_hidden)
             if self.training:
+                pdb.set_trace()
                 cvae_hidden, KLD, probability = self.cvae(dec_hidden, raw_inputs[:,enc_step,:], self.K, raw_targets[:,enc_step,:,:])
             else:
                 cvae_hidden, KLD, probability = self.cvae(dec_hidden, raw_inputs[:,enc_step,:], self.K)

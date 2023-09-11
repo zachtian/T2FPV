@@ -3,6 +3,5 @@
     "trainer": "transformer",
     "exp_tag": "det_train_transformer_eth",
     "coord": "rel",
-
     "model_design": "./config/models/transformer.json"
 }

@@ -8,12 +8,48 @@ from torch.autograd import Variable
 import torch
 import torch.nn as nn
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
+import math
 
 from vrnntools.trajpred_models.modeling.mlp import MLP
 from vrnntools.utils.common import dotdict
 from vrnntools.trajpred_models.modeling.gat import GAT
 from vrnntools.utils.adj_matrix import ego_dists
+import pdb
 
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(0.1)
+
+        position = torch.arange(max_len).unsqueeze(1).float()
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(max_len, d_model)
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:, :x.size(1), :]
+
+        return self.dropout(x)
+
+class TransformerEncoder(nn.Module):
+    def __init__(self, input_dim, d_model, nhead, num_layers, dim_feedforward):
+        super(TransformerEncoder, self).__init__()
+        self.embedding = nn.Linear(input_dim, d_model)
+        self.positional_encoding = PositionalEncoding(d_model, max_len=8)
+        self.transformer_encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, 0.1), num_layers)
+        self.dropout = nn.Dropout(0.1)
+
+    def forward(self, src):
+        src = self.embedding(src)
+        src = self.positional_encoding(src)
+        src = self.dropout(src)
+        output = self.transformer_encoder(src)
+
+        return output
 class Transformer(nn.Module):
     def __init__(self, args, device):
         super(Transformer, self).__init__()
@@ -109,14 +145,15 @@ class Transformer(nn.Module):
                                                 nn.LayerNorm(self.hidden_size//4),
                                                 nn.ReLU(inplace=True))
 
-        self.enc_drop = nn.Dropout(self.dropout)
-        self.goal_drop = nn.Dropout(self.dropout)
-        self.dec_drop = nn.Dropout(self.dropout)
+        self.drop_layer = nn.Dropout(self.dropout)
+
         self.traj_enc_cell = nn.GRUCell(self.hidden_size*2 + self.hidden_size//4, self.hidden_size)
 
         self.goal_cell = nn.GRUCell(self.hidden_size//4, self.hidden_size//4)
         self.dec_cell = nn.GRUCell(self.hidden_size + self.hidden_size//4, self.hidden_size)
-    
+
+        self.encoder = TransformerEncoder(input_dim=self.hidden_size*2, d_model=self.hidden_size, nhead=8, num_layers=2, dim_feedforward=256)
+        
     def SGE(self, goal_hidden):
         # initial goal input with zero
         goal_input = goal_hidden.new_zeros((goal_hidden.size(0), self.hidden_size//4))
@@ -124,7 +161,7 @@ class Transformer(nn.Module):
         goal_traj = goal_hidden.new_zeros(goal_hidden.size(0), self.dec_steps, self.pred_dim)
         goal_list = []
         for dec_step in range(self.dec_steps):
-            goal_hidden = self.goal_cell(self.goal_drop(goal_input), goal_hidden)
+            goal_hidden = self.goal_cell(self.drop_layer(goal_input), goal_hidden)
             # next step input is generate by hidden
             goal_input = self.goal_hidden_to_input(goal_hidden)
             goal_list.append(goal_hidden)
@@ -143,7 +180,6 @@ class Transformer(nn.Module):
         batch_size = dec_hidden.size(0)
        
         K = dec_hidden.shape[1]
-        # TODO: also add in GAT here? As in A-VRNN...
         dec_hidden = dec_hidden.view(-1, dec_hidden.shape[-1])
         dec_traj = dec_hidden.new_zeros(batch_size, self.dec_steps, K, self.pred_dim)
         for dec_step in range(self.dec_steps):
@@ -156,7 +192,7 @@ class Transformer(nn.Module):
             goal_dec_input  = torch.bmm(dec_attn,goal_dec_input).squeeze(1)
             goal_dec_input = goal_dec_input.unsqueeze(1).repeat(1, K, 1).view(-1, goal_dec_input.shape[-1])
             dec_dec_input = self.dec_hidden_to_input(dec_hidden)
-            dec_input = self.dec_drop(torch.cat((goal_dec_input,dec_dec_input),dim = -1))
+            dec_input = self.drop_layer(torch.cat((goal_dec_input,dec_dec_input),dim = -1))
             dec_hidden = self.dec_cell(dec_input, dec_hidden)
             # regress dec traj for loss
             batch_traj = self.regressor(dec_hidden)
@@ -164,42 +200,6 @@ class Transformer(nn.Module):
             dec_traj[:,dec_step,:,:] = batch_traj
         return dec_traj
 
-    def encoder(self, raw_inputs, raw_targets, traj_input, flow_input=None, start_index = 0, hist_adj=None):
-        import pdb; pdb.set_trace()
-        # initial output tensor
-        all_goal_traj = traj_input.new_zeros(traj_input.size(0), self.enc_steps, self.dec_steps, self.pred_dim)
-        all_cvae_dec_traj = traj_input.new_zeros(traj_input.size(0), self.enc_steps, self.dec_steps, self.K, self.pred_dim)
-        # initial encoder goal with zeros
-        goal_for_enc = traj_input.new_zeros((traj_input.size(0), self.hidden_size//4))
-        # initial encoder hidden with zeros
-        traj_enc_hidden = traj_input.new_zeros((traj_input.size(0), self.hidden_size))
-        total_probabilities = traj_input.new_zeros((traj_input.size(0), self.enc_steps, self.K))
-        total_KLD = 0
-        for enc_step in range(start_index, self.enc_steps):
-            traj_enc_hidden = self.traj_enc_cell(self.enc_drop(torch.cat((traj_input[:,enc_step,:], goal_for_enc), 1)), traj_enc_hidden)
-            # Refine here
-            if hist_adj is not None and self.graph is not None:
-                hist_adj_t = hist_adj[enc_step]
-                h_g = self.graph(traj_enc_hidden, hist_adj_t)
-                traj_enc_hidden = self.lg(torch.cat([traj_enc_hidden, h_g], -1))
-            enc_hidden = traj_enc_hidden
-            goal_hidden = self.enc_to_goal_hidden(enc_hidden)
-            goal_for_dec, goal_for_enc, goal_traj = self.SGE(goal_hidden)
-            all_goal_traj[:,enc_step,:,:] = goal_traj
-            dec_hidden = self.enc_to_dec_hidden(enc_hidden)
-            if self.training:
-                cvae_hidden, KLD, probability = self.cvae(dec_hidden, raw_inputs[:,enc_step,:], self.K, raw_targets[:,enc_step,:,:])
-            else:
-                cvae_hidden, KLD, probability = self.cvae(dec_hidden, raw_inputs[:,enc_step,:], self.K)
-            total_probabilities[:,enc_step,:] = probability
-            total_KLD += KLD
-            cvae_dec_hidden= self.cvae_to_dec_hidden(cvae_hidden)
-            if self.map:
-                map_input = flow_input
-                cvae_dec_hidden = (cvae_dec_hidden + map_input.unsqueeze(1))/2
-            all_cvae_dec_traj[:,enc_step,:,:,:] = self.cvae_decoder(cvae_dec_hidden, goal_for_dec)
-        return all_goal_traj, all_cvae_dec_traj, total_KLD, total_probabilities
-            
     def forward(self, inputs, map_mask=None, targets = None, start_index = 0, training=True,
                 input_resnet=None, seq_start_end=None, hist_adj=None):
         # input given in T x B x d -> need to transpose
@@ -211,9 +211,29 @@ class Transformer(nn.Module):
         traj_input_temp = self.combine_input(inputs[:,start_index:,:], input_resnet[:,start_index:,:])
         traj_input = traj_input_temp.new_zeros((inputs.size(0), inputs.size(1), traj_input_temp.size(-1)))
         traj_input[:,start_index:,:] = traj_input_temp
-        all_goal_traj, all_cvae_dec_traj, KLD, total_probabilities = self.encoder(inputs, targets, traj_input, None, start_index, 
-                                                                                  hist_adj=hist_adj)
-        return all_goal_traj, all_cvae_dec_traj, KLD, total_probabilities 
+        all_goal_traj = traj_input.new_zeros(traj_input.size(0), self.enc_steps, self.dec_steps, self.pred_dim)
+        all_cvae_dec_traj = traj_input.new_zeros(traj_input.size(0), self.enc_steps, self.dec_steps, self.K, self.pred_dim)
+        goal_for_enc = traj_input.new_zeros((traj_input.size(0), self.hidden_size//4))
+        traj_enc_hidden = traj_input.new_zeros((traj_input.size(0), self.hidden_size))
+        total_probabilities = traj_input.new_zeros((traj_input.size(0), self.enc_steps, self.K))
+        total_KLD = 0
+        enc_hidden = self.encoder(traj_input)
+
+        for enc_step in range(start_index, self.enc_steps):
+            goal_hidden = self.enc_to_goal_hidden(enc_hidden[:,enc_step,:])
+            goal_for_dec, goal_for_enc, goal_traj = self.SGE(goal_hidden)
+            all_goal_traj[:,enc_step,:,:] = goal_traj
+            dec_hidden = self.enc_to_dec_hidden(enc_hidden)
+            if self.training:
+                cvae_hidden, KLD, probability = self.cvae(dec_hidden[:,enc_step,:], inputs[:,enc_step,:], self.K, targets[:,enc_step,:,:])
+            else:
+                cvae_hidden, KLD, probability = self.cvae(dec_hidden[:,enc_step,:], inputs[:,enc_step,:], self.K)
+            total_probabilities[:,enc_step,:] = probability
+            total_KLD += KLD
+            cvae_dec_hidden= self.cvae_to_dec_hidden(cvae_hidden)
+
+            all_cvae_dec_traj[:,enc_step,:,:,:] = self.cvae_decoder(cvae_dec_hidden, goal_for_dec)
+        return all_goal_traj, all_cvae_dec_traj, total_KLD, total_probabilities
 
     def _mse(self, pred_x, gt_x) -> torch.tensor:
         return torch.sqrt(self.criterion(pred_x, gt_x))
