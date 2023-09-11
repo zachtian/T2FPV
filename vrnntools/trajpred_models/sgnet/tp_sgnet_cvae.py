@@ -239,7 +239,6 @@ class SGNet_CVAE(nn.Module):
             all_goal_traj[:,enc_step,:,:] = goal_traj
             dec_hidden = self.enc_to_dec_hidden(enc_hidden)
             if self.training:
-                pdb.set_trace()
                 cvae_hidden, KLD, probability = self.cvae(dec_hidden, raw_inputs[:,enc_step,:], self.K, raw_targets[:,enc_step,:,:])
             else:
                 cvae_hidden, KLD, probability = self.cvae(dec_hidden, raw_inputs[:,enc_step,:], self.K)
@@ -249,6 +248,7 @@ class SGNet_CVAE(nn.Module):
             if self.map:
                 map_input = flow_input
                 cvae_dec_hidden = (cvae_dec_hidden + map_input.unsqueeze(1))/2
+            pdb.set_trace()
             all_cvae_dec_traj[:,enc_step,:,:,:] = self.cvae_decoder(cvae_dec_hidden, goal_for_dec)
         return all_goal_traj, all_cvae_dec_traj, total_KLD, total_probabilities
             

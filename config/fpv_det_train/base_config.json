@@ -59,9 +59,9 @@
 		"use_input_cache": true,
 		"input_cache_path": "./data/input_data.pkl",
 		"normalize": false,
-		"train_batch_size": 256,
-		"val_batch_size": 256,
-		"test_batch_size": 256,
+		"train_batch_size": 64,
+		"val_batch_size": 64,
+		"test_batch_size": 64,
 		"loader_num_workers": 0
 	},
 	"training_details": {

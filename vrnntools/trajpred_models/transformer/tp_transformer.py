@@ -50,6 +50,22 @@ class TransformerEncoder(nn.Module):
         output = self.transformer_encoder(src)
 
         return output
+    
+class TransformerDecoder(nn.Module):
+    def __init__(self, input_dim, d_model, nhead, num_layers, dim_feedforward):
+        super(TransformerDecoder, self).__init__()
+        self.embedding = nn.Linear(input_dim, d_model)
+        self.transformer_decoder = nn.TransformerDecoder(
+            nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward, 0.1), num_layers)
+        self.dropout = nn.Dropout(0.1)
+
+    def forward(self, tgt, memory):
+        tgt = self.embedding(tgt)
+        tgt = self.dropout(tgt)
+        memory = memory.repeat(1, tgt.size(1), 1)
+        output = self.transformer_decoder(tgt, memory)
+        return output
+    
 class Transformer(nn.Module):
     def __init__(self, args, device):
         super(Transformer, self).__init__()
@@ -146,36 +162,18 @@ class Transformer(nn.Module):
                                                 nn.ReLU(inplace=True))
 
         self.drop_layer = nn.Dropout(self.dropout)
-
-        self.traj_enc_cell = nn.GRUCell(self.hidden_size*2 + self.hidden_size//4, self.hidden_size)
-
         self.goal_cell = nn.GRUCell(self.hidden_size//4, self.hidden_size//4)
         self.dec_cell = nn.GRUCell(self.hidden_size + self.hidden_size//4, self.hidden_size)
-
-        self.encoder = TransformerEncoder(input_dim=self.hidden_size*2, d_model=self.hidden_size, nhead=8, num_layers=2, dim_feedforward=256)
-        
-    def SGE(self, goal_hidden):
-        # initial goal input with zero
-        goal_input = goal_hidden.new_zeros((goal_hidden.size(0), self.hidden_size//4))
-        # initial trajectory tensor
-        goal_traj = goal_hidden.new_zeros(goal_hidden.size(0), self.dec_steps, self.pred_dim)
-        goal_list = []
-        for dec_step in range(self.dec_steps):
-            goal_hidden = self.goal_cell(self.drop_layer(goal_input), goal_hidden)
-            # next step input is generate by hidden
-            goal_input = self.goal_hidden_to_input(goal_hidden)
-            goal_list.append(goal_hidden)
-            # regress goal traj for loss
-            goal_traj_hidden = self.goal_hidden_to_traj(goal_hidden)
-            goal_traj[:,dec_step,:] = self.regressor(goal_traj_hidden)
-        # get goal for decoder and encoder
-        goal_for_dec = [self.goal_to_dec(goal) for goal in goal_list]
-        goal_for_enc = torch.stack([self.goal_to_enc(goal) for goal in goal_list],dim = 1)
-        enc_attn= self.enc_goal_attn(torch.tanh(goal_for_enc)).squeeze(-1)
-        enc_attn = F.softmax(enc_attn, dim =1).unsqueeze(1)
-        goal_for_enc  = torch.bmm(enc_attn, goal_for_enc).squeeze(1)
-        return goal_for_dec, goal_for_enc, goal_traj
-
+        self.encoder = TransformerEncoder(input_dim=self.hidden_size*2, 
+                                          d_model=self.hidden_size, 
+                                          nhead=8, 
+                                          num_layers=3, 
+                                          dim_feedforward=256)
+        self.decoder = TransformerDecoder(input_dim=self.hidden_size, 
+                                          d_model=self.hidden_size, 
+                                          nhead=8, 
+                                          num_layers=3, 
+                                          dim_feedforward=256)
     def cvae_decoder(self, dec_hidden, goal_for_dec):
         batch_size = dec_hidden.size(0)
        
@@ -202,7 +200,6 @@ class Transformer(nn.Module):
 
     def forward(self, inputs, map_mask=None, targets = None, start_index = 0, training=True,
                 input_resnet=None, seq_start_end=None, hist_adj=None):
-        # input given in T x B x d -> need to transpose
         inputs = inputs.permute(1, 0, 2)
         input_resnet = input_resnet.permute(1, 0, 2)
         self.training = training
@@ -211,29 +208,15 @@ class Transformer(nn.Module):
         traj_input_temp = self.combine_input(inputs[:,start_index:,:], input_resnet[:,start_index:,:])
         traj_input = traj_input_temp.new_zeros((inputs.size(0), inputs.size(1), traj_input_temp.size(-1)))
         traj_input[:,start_index:,:] = traj_input_temp
-        all_goal_traj = traj_input.new_zeros(traj_input.size(0), self.enc_steps, self.dec_steps, self.pred_dim)
         all_cvae_dec_traj = traj_input.new_zeros(traj_input.size(0), self.enc_steps, self.dec_steps, self.K, self.pred_dim)
-        goal_for_enc = traj_input.new_zeros((traj_input.size(0), self.hidden_size//4))
-        traj_enc_hidden = traj_input.new_zeros((traj_input.size(0), self.hidden_size))
-        total_probabilities = traj_input.new_zeros((traj_input.size(0), self.enc_steps, self.K))
-        total_KLD = 0
         enc_hidden = self.encoder(traj_input)
-
+        dec_hidden = self.enc_to_dec_hidden(enc_hidden)
         for enc_step in range(start_index, self.enc_steps):
-            goal_hidden = self.enc_to_goal_hidden(enc_hidden[:,enc_step,:])
-            goal_for_dec, goal_for_enc, goal_traj = self.SGE(goal_hidden)
-            all_goal_traj[:,enc_step,:,:] = goal_traj
-            dec_hidden = self.enc_to_dec_hidden(enc_hidden)
             if self.training:
-                cvae_hidden, KLD, probability = self.cvae(dec_hidden[:,enc_step,:], inputs[:,enc_step,:], self.K, targets[:,enc_step,:,:])
+                cvae_hidden = self.cvae(dec_hidden[:,enc_step,:], inputs[:,enc_step,:], self.K, targets[:,enc_step,:,:])
             else:
-                cvae_hidden, KLD, probability = self.cvae(dec_hidden[:,enc_step,:], inputs[:,enc_step,:], self.K)
-            total_probabilities[:,enc_step,:] = probability
-            total_KLD += KLD
+                cvae_hidden = self.cvae(dec_hidden[:,enc_step,:], inputs[:,enc_step,:], self.K)
             cvae_dec_hidden= self.cvae_to_dec_hidden(cvae_hidden)
-
-            all_cvae_dec_traj[:,enc_step,:,:,:] = self.cvae_decoder(cvae_dec_hidden, goal_for_dec)
-        return all_goal_traj, all_cvae_dec_traj, total_KLD, total_probabilities
-
-    def _mse(self, pred_x, gt_x) -> torch.tensor:
-        return torch.sqrt(self.criterion(pred_x, gt_x))
+            pdb.set_trace()
+            all_cvae_dec_traj[:,enc_step,:,:,:] = self.decoder(cvae_dec_hidden, enc_hidden[:,enc_step,:].unsqueeze(1))
+        return all_cvae_dec_traj
