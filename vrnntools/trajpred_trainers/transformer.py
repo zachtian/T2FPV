@@ -355,7 +355,6 @@ class TransformerTrainer(BaseTrainer):
             verbose=True)
         
         self.train_losses = metrics.LossContainer(loss_list=['Loss', 'LossGoal', 'LossDec', 'LossKLD', 'LossMSE'])
-        # TODO: re-assess metrics, likely incorporate mAP (?)
         self.eval_metrics = MetricContainer(metric_list=['MinADE', 'MinFDE', 'MinADEMed', 'MinFDEMed'], main_metric='MinADE')
 
         if self.config.TRAIN.load_model:
