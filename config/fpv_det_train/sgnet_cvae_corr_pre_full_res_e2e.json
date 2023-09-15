@@ -1,5 +1,5 @@
 {
-    "base_config": "./config/fpv_det_train/base_config.json",
+    "base_config": "./config/fpv_det_train/base_config_naomi.json",
     "trainer": "sgnet",
     "exp_tag": "det_train_corr_pre_full_res_e2e_eth",
     "coord": "rel",

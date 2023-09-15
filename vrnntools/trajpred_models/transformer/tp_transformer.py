@@ -160,7 +160,7 @@ class Transformer(nn.Module):
                                                     self.hidden_size//4),
                                                 nn.LayerNorm(self.hidden_size//4),
                                                 nn.ReLU(inplace=True))
-
+        self.traj_enc_cell = nn.GRUCell(self.hidden_size*2 + self.hidden_size//4, self.hidden_size)
         self.drop_layer = nn.Dropout(self.dropout)
         self.goal_cell = nn.GRUCell(self.hidden_size//4, self.hidden_size//4)
         self.dec_cell = nn.GRUCell(self.hidden_size + self.hidden_size//4, self.hidden_size)
@@ -174,6 +174,7 @@ class Transformer(nn.Module):
                                           nhead=8, 
                                           num_layers=3, 
                                           dim_feedforward=256)
+        
     def cvae_decoder(self, dec_hidden, goal_for_dec):
         batch_size = dec_hidden.size(0)
        
@@ -200,23 +201,62 @@ class Transformer(nn.Module):
 
     def forward(self, inputs, map_mask=None, targets = None, start_index = 0, training=True,
                 input_resnet=None, seq_start_end=None, hist_adj=None):
+        # input given in T x B x d -> need to transpose
         inputs = inputs.permute(1, 0, 2)
-        input_resnet = input_resnet.permute(1, 0, 2)
+        if input_resnet is not None:
+            input_resnet = input_resnet.permute(1, 0, 2)
         self.training = training
         if torch.is_tensor(start_index):
             start_index = start_index[0].item()
-        traj_input_temp = self.combine_input(inputs[:,start_index:,:], input_resnet[:,start_index:,:])
+        if self.feat_enc_resnet is not None:
+            traj_input_temp = self.combine_input(inputs[:,start_index:,:], input_resnet[:,start_index:,:])
+        else:
+            # One layer: 4 -> 96 -> ReLu
+            traj_input_temp = self.feature_extractor(inputs[:,start_index:,:])
         traj_input = traj_input_temp.new_zeros((inputs.size(0), inputs.size(1), traj_input_temp.size(-1)))
         traj_input[:,start_index:,:] = traj_input_temp
+        all_goal_traj = traj_input.new_zeros(traj_input.size(0), self.enc_steps, self.dec_steps, self.pred_dim)
         all_cvae_dec_traj = traj_input.new_zeros(traj_input.size(0), self.enc_steps, self.dec_steps, self.K, self.pred_dim)
-        enc_hidden = self.encoder(traj_input)
-        dec_hidden = self.enc_to_dec_hidden(enc_hidden)
+        # initial encoder goal with zeros
+        goal_for_enc = traj_input.new_zeros((traj_input.size(0), self.hidden_size//4))
+        # initial encoder hidden with zeros
+        traj_enc_hidden = traj_input.new_zeros((traj_input.size(0), self.hidden_size))
+        total_KLD = 0
         for enc_step in range(start_index, self.enc_steps):
+            traj_enc_hidden = self.traj_enc_cell(self.drop_layer(torch.cat((traj_input[:,enc_step,:], goal_for_enc), 1)), traj_enc_hidden)
+            # Refine here
+            if hist_adj is not None and self.graph is not None:
+                hist_adj_t = hist_adj[enc_step]
+                h_g = self.graph(traj_enc_hidden, hist_adj_t)
+                traj_enc_hidden = self.lg(torch.cat([traj_enc_hidden, h_g], -1))
+            enc_hidden = traj_enc_hidden
+            goal_hidden = self.enc_to_goal_hidden(enc_hidden)
+            goal_input = goal_hidden.new_zeros((goal_hidden.size(0), self.hidden_size//4))
+            # initial trajectory tensor
+            goal_traj = goal_hidden.new_zeros(goal_hidden.size(0), self.dec_steps, self.pred_dim)
+            goal_list = []
+            for dec_step in range(self.dec_steps):
+                goal_hidden = self.goal_cell(self.drop_layer(goal_input), goal_hidden)
+                # next step input is generate by hidden
+                goal_input = self.goal_hidden_to_input(goal_hidden)
+                goal_list.append(goal_hidden)
+                # regress goal traj for loss
+                goal_traj_hidden = self.goal_hidden_to_traj(goal_hidden)
+                goal_traj[:,dec_step,:] = self.regressor(goal_traj_hidden)
+            # get goal for decoder and encoder
+            goal_for_dec = [self.goal_to_dec(goal) for goal in goal_list]
+            goal_for_enc = torch.stack([self.goal_to_enc(goal) for goal in goal_list],dim = 1)
+            enc_attn= self.enc_goal_attn(torch.tanh(goal_for_enc)).squeeze(-1)
+            enc_attn = F.softmax(enc_attn, dim =1).unsqueeze(1)
+            goal_for_enc  = torch.bmm(enc_attn, goal_for_enc).squeeze(1)
+            all_goal_traj[:,enc_step,:,:] = goal_traj
+            dec_hidden = self.enc_to_dec_hidden(enc_hidden)
             if self.training:
-                cvae_hidden = self.cvae(dec_hidden[:,enc_step,:], inputs[:,enc_step,:], self.K, targets[:,enc_step,:,:])
+                cvae_hidden, KLD, probability = self.cvae(dec_hidden, inputs[:,enc_step,:], self.K, targets[:,enc_step,:,:])
             else:
-                cvae_hidden = self.cvae(dec_hidden[:,enc_step,:], inputs[:,enc_step,:], self.K)
+                cvae_hidden, KLD, probability = self.cvae(dec_hidden, inputs[:,enc_step,:], self.K)
+            total_KLD += KLD
             cvae_dec_hidden= self.cvae_to_dec_hidden(cvae_hidden)
-            pdb.set_trace()
-            all_cvae_dec_traj[:,enc_step,:,:,:] = self.decoder(cvae_dec_hidden, enc_hidden[:,enc_step,:].unsqueeze(1))
-        return all_cvae_dec_traj
+
+            all_cvae_dec_traj[:,enc_step,:,:,:] = self.cvae_decoder(cvae_dec_hidden, goal_for_dec)
+        return all_goal_traj, all_cvae_dec_traj, KLD 

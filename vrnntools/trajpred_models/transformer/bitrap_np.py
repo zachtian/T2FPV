@@ -97,21 +97,32 @@ class BiTraPNP(nn.Module):
             z_logvar_q = z_mu_logvar_q[:, self.args['LATENT_DIM']:]
             Z_mu = z_mu_q
             Z_logvar = z_logvar_q
-        
+
+            # 3. compute KL(q_z_xy||p_z_x)
+            KLD = 0.5 * ((z_logvar_q.exp()/z_logvar_p.exp()) + \
+                        (z_mu_p - z_mu_q).pow(2)/z_logvar_p.exp() - \
+                        1 + \
+                        (z_logvar_p - z_logvar_q))
+            KLD = KLD.sum(dim=-1).mean()
+            KLD = torch.clamp(KLD, min=0.001)
+            
         else:
             Z_mu = z_mu_p
             Z_logvar = z_logvar_p
+            KLD = torch.as_tensor(0.0, device=Z_logvar.device)
         
         # 4. Draw sample
         with torch.set_grad_enabled(False):
             K_samples = torch.normal(self.nu, self.sigma, size = (enc_h.shape[0], K, self.args['LATENT_DIM'])).to(Z_logvar.device)
 
+        probability = reconstructed_probability(K_samples)
         Z_std = torch.exp(0.5 * Z_logvar)
         Z = Z_mu.unsqueeze(1).repeat(1, K, 1) + K_samples * Z_std.unsqueeze(1).repeat(1, K, 1)
         if z_mode:
             Z = torch.cat((Z_mu.unsqueeze(1), Z), dim=1)
+
         
-        return Z
+        return Z, KLD, probability
 
 
     def forward(self, h_x, last_input, K, target_y=None):
@@ -119,7 +130,7 @@ class BiTraPNP(nn.Module):
         Params:
 
         '''
-        Z = self.gaussian_latent_net(h_x, last_input, K, target_y, z_mode=False)
+        Z, KLD, probability = self.gaussian_latent_net(h_x, last_input, K, target_y, z_mode=False)
         enc_h_and_z = torch.cat([h_x.unsqueeze(1).repeat(1, Z.shape[1], 1), Z], dim=-1)
         dec_h = enc_h_and_z if self.args['DEC_WITH_Z'] else h_x
-        return dec_h
+        return dec_h, KLD, probability

@@ -111,14 +111,16 @@ class TransformerTrainer(BaseTrainer):
             # Worry about nan's in the rmse function...
             # Assume aligned only in training, since targets cannot have nan...
             model_in = gt_in if self.train_gt else hist_in
-            all_dec_traj = self.model(model_in, map_mask=None, targets=target_traj, start_index=0, training=True,
-                        input_resnet=hist_resnet, seq_start_end=hist_seq_start_end)
+            all_goal_traj, all_dec_traj, KLD_loss = \
+                    self.model(model_in, map_mask=None, targets=target_traj, start_index=0, training=True,
+                            input_resnet=hist_resnet, seq_start_end=hist_seq_start_end)
 
-            # Shapes: B x obs_len x pred_len x 2
+            goal_ades = thres_rmse(all_goal_traj, target_traj, hist_seq_start_end, gt_seq_start_end, assume_aligned=True)
             dec_ades = thres_cvae(all_dec_traj, target_traj, hist_seq_start_end, gt_seq_start_end, assume_aligned=True)
 
-            loss = self.compute_loss(epoch=epoch, dec=dec_ades.sum()/self.fut_len, mse=mse_corr)
-
+            # ADE loss probably...
+            loss = self.compute_loss(epoch=epoch, goal=goal_ades.sum()/self.fut_len, dec=dec_ades.sum()/self.fut_len, \
+                                    kld=KLD_loss, mse=mse_corr)
             batch_loss += loss['Loss']
             batch_count += 1
     
@@ -187,7 +189,7 @@ class TransformerTrainer(BaseTrainer):
             
             # run forward propagation for the trajectory's history, assuming model is deterministic for warmup on obs
             with torch.no_grad():
-                all_dec_traj= self.model(hist_in, map_mask=None, targets=target_traj, start_index=0, training=False,
+                all_goal_traj, all_dec_traj, KLD_loss= self.model(hist_in, map_mask=None, targets=target_traj, start_index=0, training=False,
                             input_resnet=hist_resnet, seq_start_end=hist_seq_start_end)
 
                 preds = hist_abs[-1] + all_dec_traj[:, -1].permute(2, 1, 0, 3)
@@ -275,7 +277,7 @@ class TransformerTrainer(BaseTrainer):
             
             # run forward propagation for the trajectory's history, assuming model is deterministic for warmup on obs
             with torch.no_grad():
-                all_dec_traj = self.model(hist_in, map_mask=None, targets=target_traj, start_index=0, training=False,
+                all_goal_traj, all_dec_traj, KLD_loss = self.model(hist_in, map_mask=None, targets=target_traj, start_index=0, training=False,
                             input_resnet=hist_resnet, seq_start_end=hist_seq_start_end)
 
                 preds = hist_abs[-1] + all_dec_traj[:, -1].permute(2, 1, 0, 3)

@@ -199,7 +199,7 @@ class SGNetCVAETrainer(BaseTrainer):
                 # ADE loss probably...
                 loss = self.compute_loss(epoch=epoch, goal=goal_ades.sum()/self.fut_len, dec=dec_ades.sum()/self.fut_len, \
                                         kld=KLD_loss, mse=mse_corr)
-            batch_loss += loss['Loss']
+            batch_loss += loss['Loss']+naomi_loss
             batch_count += 1
     
             if batch_count >= self.batch_size:
@@ -510,7 +510,7 @@ class SGNetCVAETrainer(BaseTrainer):
                     models.append(None)
                     continue
                 from run import get_exp_config
-                pre_config = get_exp_config(pretrained_path, run_type='test', ckpt=None, fold=self.config.DATASET.name,
+                pre_config = get_exp_config(pretrained_path, run_type='trainval', ckpt=None, fold=self.config.DATASET.name,
                                             gpu_id=self.config.BASE_CONFIG.gpu_id, use_cpu=self.config.BASE_CONFIG.use_cpu,
                                             max_test_epoch=self.config.BASE_CONFIG.max_test_epoch, corr=self.config.BASE_CONFIG.train_corr,
                                             epochs=self.config.BASE_CONFIG.n_epoch, no_tqdm=False)
@@ -528,7 +528,6 @@ class SGNetCVAETrainer(BaseTrainer):
                     trainer = EgoAVRNNTrainer(config=pre_config)
                 elif pre_config['trainer'] == 'sgnet':
                     trainer = SGNetCVAETrainer(config=pre_config)
-                _ = trainer.eval(do_eval=False, load_only=True)
                 models.append(trainer.model)
             self.pretrained = True
             self.pretrained_module = models[0]

@@ -248,7 +248,6 @@ class SGNet_CVAE(nn.Module):
             if self.map:
                 map_input = flow_input
                 cvae_dec_hidden = (cvae_dec_hidden + map_input.unsqueeze(1))/2
-            pdb.set_trace()
             all_cvae_dec_traj[:,enc_step,:,:,:] = self.cvae_decoder(cvae_dec_hidden, goal_for_dec)
         return all_goal_traj, all_cvae_dec_traj, total_KLD, total_probabilities
             
